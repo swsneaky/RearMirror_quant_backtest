@@ -1,0 +1,348 @@
+# ============================================================
+# RearMirror 全局配置文件 (唯一真理来源)
+# 铁律一：所有超参数、路径、开关统一收口于此
+# ============================================================
+
+# ----------------------------------------------------------
+# 统一数据库 (SQLite)
+# ----------------------------------------------------------
+database:
+  path: "data/quant.db"              # SQLite 统一数据库路径 (WAL 模式, 支持并发)
+
+# ----------------------------------------------------------
+# 数据源与 ETL
+# ----------------------------------------------------------
+etl:
+  index_name: "zz500"                     # 目标指数
+  start_date: "2016-01-01"
+  end_date: "2026-03-29"
+  sample_freq: "6ME"                      # 成份股采样频率
+  max_stocks: 0                           # 限制下载股票数 (0 = 不限制, 方便测试)
+  cache_dir: "data/stock_daily_cache"     # 个股日线缓存
+  raw_output: "data/raw/zz500_10y_daily_clean.parquet"
+  industry_map: "data/raw/stock_industry_map.parquet"
+  update_mode: "incremental"              # "incremental" 增量 | "full" 全量重建
+  anti_crawl:
+    sleep_per_stock: [0.2, 0.5]           # 每只股票随机休眠区间 (秒)
+    checkpoint_every: 20                  # 每 N 只触发长休眠
+    checkpoint_sleep: [5.0, 10.0]         # 长休眠区间 (秒)
+    max_retry: 3
+
+# ----------------------------------------------------------
+# 特征工程 (Alpha158)
+# ----------------------------------------------------------
+features:
+  # Registry 中激活的因子组 (turnover/valuation 需重新下载含 turn/PE 的数据)
+  active_factors: [kline, rolling, rolling_ext, technical, turnover, valuation]
+  excluded_features: []                   # 从选用因子组中排除的单个因子 (如 feat_KLOW2)
+  raw_feature_output: "data/features/zz500_alpha158_raw.parquet"   # 原始全因子矩阵 (未中性化)
+  min_listing_days: 60                    # 次新股过滤：上市未满60个交易日过滤
+  windows: [5, 10, 20, 30, 60]           # 铁律四：中低频趋势窗口
+  kline_features:                         # K线日内形态因子 (7个)
+    - KMID
+    - KLEN
+    - KUP
+    - KLOW
+    - KMID2
+    - KUP2
+    - KLOW2
+  rolling_features:                       # 每个窗口生成的基础因子后缀 (17个)
+    - ROC
+    - MA
+    - STD
+    - EMA
+    - MAX
+    - MIN
+    - RSV
+    - IMAX
+    - IMIN
+    - RANK
+    - VMA
+    - VSTD
+    - WVMA
+    - CORR
+    - BETA
+    - RSQR
+    - RESI
+  rolling_ext_features:                   # 每个窗口生成的扩展因子后缀 (12个)
+    - QTLU
+    - QTLD
+    - CORD
+    - CNTP
+    - CNTN
+    - CNTD
+    - SUMP
+    - SUMN
+    - SUMD
+    - VSUMP
+    - VSUMN
+    - VSUMD
+  technical_features:                     # 技术指标因子 (已删除冗余 PSY≡CNTP, BIAS≡MA, WILLR≡1-RSV)
+    per_window: [RSI, CCI, VWAP_BIAS]    # 3×5=15
+    fixed: [MACD_DIF, MACD_DEA, MACD_HIST, KDJ_K, KDJ_D, KDJ_J, OBV, MFI14]  # 8
+  turnover_features:                      # 换手率因子 (需 raw_turn)
+    per_window: [TURN_MA, TURN_STD]       # 2×5=10
+    fixed: [DTURN]                        # 1
+  valuation_features:                     # 估值因子 (需 raw_peTTM 等)
+    metrics: [PE, PB, PS, PCF]
+    per_metric_per_window: [MA, RANK]     # 2×5×4=40
+    per_metric_fixed: [LOG]               # 1×4=4
+  output: "data/features/zz500_alpha158_neutralized.parquet"
+
+# ----------------------------------------------------------
+# 截面处理 (MAD + 行业中性化 + Z-Score)
+# ----------------------------------------------------------
+cross_section:
+  mad_multiplier: 3.148                   # MAD 去极值倍数 (≈3σ)
+  min_industry_stocks: 5                  # 铁律四：行业小样本保护阈值
+  zscore_eps: 1.0e-8                      # 标准化除零保护
+
+# ----------------------------------------------------------
+# 标签生成
+# ----------------------------------------------------------
+label:
+  name: "label_5d_ret"                    # 列名 (遵守 label_ 前缀协议)
+  horizon: 5                              # 未来 N 天累积收益
+  method: "pctChg_sum"                    # pctChg_sum | close_ratio
+
+# ----------------------------------------------------------
+# 模型配置 (插拔式)
+# ----------------------------------------------------------
+model:
+  active: "xgboost"                      # lightgbm | xgboost | random_forest
+
+  lightgbm:
+    # --- 损失函数 & 迭代 ---
+    objective: "huber"                    # regression | huber | fair | poisson | quantile | mape
+    boosting_type: "gbdt"                 # gbdt | dart | rf | goss
+    n_estimators: 200                     # 迭代轮数
+    learning_rate: 0.05                   # 学习率
+    early_stopping_round: 50              # 早停轮数 (需验证集，None 禁用)
+
+    # --- 树结构 ---
+    max_depth: 4                          # 最大深度 (-1=不限)
+    num_leaves: 12                        # 叶子节点上限 (< 2^max_depth)
+    min_child_samples: 800                # 叶节点最小样本数 (别名 min_data_in_leaf)
+    min_child_weight: 0.001               # 叶节点最小权重和 (Hessian)
+    min_split_gain: 0.0                   # 分裂最小增益 (别名 min_gain_to_split)
+
+    # --- 直方图 ---
+    max_bin: 255                          # 直方图分箱数 (越大越精确，越慢)
+    min_data_in_bin: 3                    # 每个箱子最小样本数
+
+    # --- 正则化 ---
+    reg_lambda: 10.0                      # L2 正则 (别名 lambda)
+    reg_alpha: 1.0                        # L1 正则 (别名 alpha)
+    path_smooth: 0.0                      # 路径平滑参数，防止过拟合 (0=禁用)
+    extra_trees: false                    # 极端随机树，增加多样性
+    drop_rate: 0.1                        # DART 模式 drop 比例
+    max_drop: 50                          # DART 模式最大 drop 数
+    skip_drop: 0.5                        # DART 模式 skip 概率
+
+    # --- 采样 ---
+    colsample_bytree: 0.8                 # 特征采样比例 (别名 feature_fraction)
+    colsample_bynode: 1.0                 # 每个节点特征采样比例
+    subsample: 0.8                        # 样本采样比例 (别名 bagging_fraction)
+    subsample_freq: 1                     # 采样频率 (每 N 轮，别名 bagging_freq)
+    pos_bagging_fraction: 1.0             # 正样本采样比例
+    neg_bagging_fraction: 1.0             # 负样本采样比例
+
+    # --- GOSS 专用 ---
+    top_rate: 0.2                         # GOSS: 保留大梯度样本比例
+    other_rate: 0.1                       # GOSS: 随机采样小梯度样本比例
+
+    # --- 其他 ---
+    importance_type: "gain"               # gain | split
+    verbose: -1
+    random_state: 42
+    n_jobs: 1                             # 铁律六：外层并行时内层必须为 1
+    force_col_wise: false                 # 强制列存储 (大数据集内存更优)
+    force_row_wise: false                 # 强制行存储 (小数据集更快)
+
+  xgboost:
+    # --- 损失函数 & 迭代 ---
+    objective: "reg:squarederror"         # reg:squarederror | reg:squaredlogerror | reg:pseudohubererror | reg:absoluteerror
+    n_estimators: 200                     # 迭代轮数
+    learning_rate: 0.05                   # 学习率 (别名 eta)
+    early_stopping_rounds: 50             # 早停轮数 (需验证集，None 禁用)
+
+    # --- 树结构 ---
+    max_depth: 4                          # 最大深度 (0=不限)
+    max_leaves: 12                        # 叶子节点上限 (需 grow_policy=lossguide)
+    grow_policy: "lossguide"              # depthwise | lossguide (启用 max_leaves)
+    min_child_weight: 1.0                 # 叶节点最小 Hessian 和
+    gamma: 0.1                            # 节点分裂最小损失减少 (别名 min_split_loss)
+    max_delta_step: 0.0                   # 每个叶节点权重估计的最大增量 (类别不平衡时有用)
+
+    # --- 直方图 (tree_method='hist') ---
+    max_bin: 256                          # 直方图分箱数
+    num_parallel_tree: 1                  # 并行树数量 (Random Forest 模式)
+
+    # --- 正则化 ---
+    reg_lambda: 10.0                      # L2 正则
+    reg_alpha: 1.0                        # L1 正则
+
+    # --- 采样 ---
+    colsample_bytree: 0.8                 # 每棵树特征采样比例
+    colsample_bylevel: 1.0                # 每层特征采样比例
+    colsample_bynode: 1.0                 # 每个节点特征采样比例
+    subsample: 0.8                        # 样本采样比例
+    tree_method: "hist"                   # auto | exact | approx | hist | gpu_hist
+
+    # --- 稀疏数据 ---
+    sketch_eps: 0.03                      # 近似算法的分位数精度
+
+    # --- DART 专用 ---
+    sample_type: "uniform"                # uniform | weighted (DART 采样类型)
+    normalize_type: "tree"                # tree | forest (DART 归一化类型)
+    rate_drop: 0.0                        # DART drop 比例
+    one_drop: false                       # DART 是否至少 drop 一棵树
+    skip_drop: 0.0                        # DART skip drop 概率
+
+    # --- 单调约束 ---
+    monotone_constraints: null            # 特征单调约束 (列表，1=递增，-1=递减，0=无)
+    interaction_constraints: null         # 特征交互约束
+
+    # --- 其他 ---
+    base_score: 0.5                       # 初始预测分数
+    random_state: 42
+    n_jobs: 1                             # 铁律六
+    verbosity: 0                          # 0=静默, 1=警告, 2=信息, 3=调试
+
+  random_forest:
+    # --- 损失函数 & 基础 ---
+    criterion: "squared_error"            # squared_error | absolute_error | friedman_mse | poisson
+    n_estimators: 100                     # 树的数量
+
+    # --- 树结构 ---
+    max_depth: 10                         # 最大深度 (null=不限)
+    min_samples_leaf: 200                 # 叶节点最小样本数 (对齐 min_child_samples)
+    min_samples_split: 400                # 内部节点最小分裂样本数
+    min_impurity_decrease: 0.0            # 最小不纯度减少 (对应 gamma)
+    min_weight_fraction_leaf: 0.0         # 叶节点最小权重分数
+
+    # --- 采样 ---
+    max_features: 0.8                     # 特征采样比例 (对齐 colsample_bytree)
+    max_samples: 0.8                      # 样本采样比例 (需 bootstrap=true, 对齐 subsample)
+    bootstrap: true                       # 自助采样
+    oob_score: false                      # 是否计算袋外分数 (可用于验证)
+
+    # --- 正则化 ---
+    ccp_alpha: 0.01                       # 代价复杂度剪枝系数
+
+    # --- 其他 ---
+    warm_start: false                     # 是否复用上次训练结果
+    random_state: 42
+    n_jobs: 8                             # 14650HX: 16核24线程，用1/3避免卡顿；HPO/Stacking并行时改回1
+
+# ----------------------------------------------------------
+# 回测引擎 (Walk-Forward)
+# ----------------------------------------------------------
+backtest:
+  train_window: 500                       # 训练窗口 (天)
+  gap: 5                                  # 铁律五：隔离带 >= label.horizon
+  test_step: 5                            # 铁律五：步长对齐预测周期
+  top_k: 30                               # 每期做多 Top K 只
+  friction_cost: 0.0004                   # 单边摩擦成本 (万四)
+  limit_pct_threshold: 9.8               # 涨跌停识别阈值 (%)，超过则认为无法成交
+  return_shap: false                      # true = 每期计算 SHAP 重要性并落盘
+
+# ----------------------------------------------------------
+# 运行模式 (正式 / 共享机器降级)
+# ----------------------------------------------------------
+runtime:
+  default_mode: "formal"                  # 正式默认入口：保留全量 materialization
+  shared_machine_default_mode: "shared_machine"
+  modes:
+    formal:
+      description: "正式全量 materialization；保留完整特征列、全日期范围与原始回测窗口。"
+      recent_trade_dates: null
+      feature_limit: null
+      neutralize_chunk_days: 256          # 分段中性化：formal 默认每块 256 个交易日
+      backtest_overrides: {}
+    shared_machine:
+      description: "共享机器降级取证模式；裁剪到最近 260 个交易日和前 32 个特征，并缩小回测窗口。"
+      recent_trade_dates: 260
+      feature_limit: 32
+      neutralize_chunk_days: 128          # 同语义执行，降低共享机器上的单块内存/黑箱尾段
+      backtest_overrides:
+        train_window: 120
+        test_step: 20
+
+# ----------------------------------------------------------
+# 因子有效性分析
+# ----------------------------------------------------------
+analysis:
+  ic_output: "data/features/ic_series.parquet"       # IC 时序 (date × factor)
+  icir_output: "data/features/icir.parquet"           # ICIR 汇总 (factor × metric)
+  ic_decay_output: "data/features/ic_decay.parquet"  # IC Decay (lag × factor)
+  shap_output: "data/features/shap_importance.parquet"  # SHAP 重要性 (date × factor)
+  ic_max_lag: 10                                      # IC decay 最大滞后周期
+
+# ----------------------------------------------------------
+# 资源与工程
+# ----------------------------------------------------------
+engine:
+  n_cores: 4                              # 外层并行核数
+  float_dtype: "float32"                  # 铁律三：内存纪律
+  random_seed: 42
+
+# ----------------------------------------------------------
+# 超参数优化 (HPO)
+# ----------------------------------------------------------
+hpo:
+  enabled: false                             # 是否启用 HPO
+  n_trials: 50                               # 优化试验次数
+  objective_metric: "sharpe_ratio"           # 优化目标: sharpe_ratio, ic_mean, icir, annual_return
+  output_dir: "data/results/hpo"             # HPO 结果输出目录
+  n_jobs: 1                                  # 并行数 (建议为 1，避免模型内部并行冲突)
+  timeout: null                              # 超时时间 (秒)，null 表示不限制
+  resume: false                              # 是否恢复已有研究
+
+  # 搜索空间配置 (可选覆盖默认搜索空间)
+  search_space:
+    lightgbm:
+      n_estimators: [100, 500]               # [min, max]
+      learning_rate: [0.01, 0.15]
+      max_depth: [3, 8]
+    xgboost:
+      n_estimators: [100, 500]
+      learning_rate: [0.01, 0.15]
+      max_depth: [3, 8]
+    random_forest:
+      n_estimators: [50, 300]
+      max_depth: [5, 20]
+
+# ----------------------------------------------------------
+# Stacking 集成学习
+# ----------------------------------------------------------
+stacking:
+  enabled: false                             # 是否启用 Stacking
+  base_learners: [lightgbm, xgboost]         # 基学习器列表
+  meta_learner: "weight_averaging"           # 元学习器类型: weight_averaging | linear
+  validation_ratio: 0.2                      # 验证集比例 (非 CV 模式)
+  cv_folds: 5                                # 交叉验证折数 (用于生成元特征)
+  use_cv: true                               # 是否使用交叉验证生成元特征
+  output_dir: "data/results/stacking"        # 输出目录
+
+# ----------------------------------------------------------
+# 路径约定 (铁律三 & 七)
+# 分层规则 (参见 src/paths.py):
+#   data/db/          <- 正式数据库
+#   data/raw/         <- 原始层
+#   data/cache/       <- 可重建缓存 (stock_daily, checkpoint, fingerprints)
+#   data/features/    <- 正式特征/标签 versioned asset + compat parquet
+#   data/results/     <- 正式回测结果 + 因子分析
+#   experiments/      <- 实验产物 (按实验 ID 隔离)
+#   qa/               <- QA 临时产物
+#   models/           <- 正式模型
+#   logs/             <- 运行日志
+#   tools/            <- 工具与草稿脚本
+# ----------------------------------------------------------
+paths:
+  data_raw: "data/raw"
+  data_features: "data/features"
+  data_results: "data/results"                # 标准化回测产物默认目录
+  data_cache: "data/cache"                    # 可重建缓存根目录
+  models: "models"
+  logs: "logs"

@@ -1,0 +1,19 @@
+# ============================================================
+# 实验 Profile: 中证500 + XGBoost 基线
+# 只需写要覆盖 base_config.yaml 的项，其余自动继承
+# ============================================================
+
+etl:
+  index_name: "zz500"
+
+model:
+  active: "xgboost"
+  xgboost:
+    n_estimators: 100
+    learning_rate: 0.05
+    max_depth: 4
+
+backtest:
+  top_k: 30
+  max_turnover: 0
+  benchmark_code: "sh.000905"
