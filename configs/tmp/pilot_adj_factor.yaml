@@ -1,0 +1,292 @@
+database:
+  path: data/qa/pilot_adj_factor.db
+etl:
+  index_name: zz500
+  start_date: '2023-01-01'
+  end_date: '2024-12-31'
+  sample_freq: 6ME
+  max_stocks: 0
+  cache_dir: data/qa/pilot_cache
+  raw_output: data/raw/zz500_10y_daily_clean.parquet
+  industry_map: data/raw/stock_industry_map.parquet
+  update_mode: full
+  anti_crawl:
+    sleep_per_stock:
+    - 0.2
+    - 0.5
+    checkpoint_every: 20
+    checkpoint_sleep:
+    - 5.0
+    - 10.0
+    max_retry: 3
+price:
+  mode: forward
+features:
+  active_factors:
+  - kline
+  - rolling
+  - rolling_ext
+  - technical
+  - turnover
+  - valuation
+  excluded_features: []
+  raw_feature_output: data/features/zz500_alpha158_raw.parquet
+  min_listing_days: 60
+  windows:
+  - 5
+  - 10
+  - 20
+  - 30
+  - 60
+  kline_features:
+  - KMID
+  - KLEN
+  - KUP
+  - KLOW
+  - KMID2
+  - KUP2
+  - KLOW2
+  rolling_features:
+  - ROC
+  - MA
+  - STD
+  - EMA
+  - MAX
+  - MIN
+  - RSV
+  - IMAX
+  - IMIN
+  - RANK
+  - VMA
+  - VSTD
+  - WVMA
+  - CORR
+  - BETA
+  - RSQR
+  - RESI
+  rolling_ext_features:
+  - QTLU
+  - QTLD
+  - CORD
+  - CNTP
+  - CNTN
+  - CNTD
+  - SUMP
+  - SUMN
+  - SUMD
+  - VSUMP
+  - VSUMN
+  - VSUMD
+  technical_features:
+    per_window:
+    - RSI
+    - CCI
+    - VWAP_BIAS
+    fixed:
+    - MACD_DIF
+    - MACD_DEA
+    - MACD_HIST
+    - KDJ_K
+    - KDJ_D
+    - KDJ_J
+    - OBV
+    - MFI14
+  turnover_features:
+    per_window:
+    - TURN_MA
+    - TURN_STD
+    fixed:
+    - DTURN
+  valuation_features:
+    metrics:
+    - PE
+    - PB
+    - PS
+    - PCF
+    per_metric_per_window:
+    - MA
+    - RANK
+    per_metric_fixed:
+    - LOG
+  output: data/features/zz500_alpha158_neutralized.parquet
+cross_section:
+  mad_multiplier: 3.148
+  min_industry_stocks: 5
+  zscore_eps: 1.0e-08
+label:
+  name: label_5d_ret
+  horizon: 5
+  method: pctChg_sum
+model:
+  active: xgboost
+  lightgbm:
+    objective: huber
+    boosting_type: gbdt
+    n_estimators: 200
+    learning_rate: 0.05
+    early_stopping_round: 50
+    max_depth: 4
+    num_leaves: 12
+    min_child_samples: 800
+    min_child_weight: 0.001
+    min_split_gain: 0.0
+    max_bin: 255
+    min_data_in_bin: 3
+    reg_lambda: 10.0
+    reg_alpha: 1.0
+    path_smooth: 0.0
+    extra_trees: false
+    drop_rate: 0.1
+    max_drop: 50
+    skip_drop: 0.5
+    colsample_bytree: 0.8
+    colsample_bynode: 1.0
+    subsample: 0.8
+    subsample_freq: 1
+    pos_bagging_fraction: 1.0
+    neg_bagging_fraction: 1.0
+    top_rate: 0.2
+    other_rate: 0.1
+    importance_type: gain
+    verbose: -1
+    random_state: 42
+    n_jobs: 1
+    force_col_wise: false
+    force_row_wise: false
+  xgboost:
+    objective: reg:squarederror
+    n_estimators: 200
+    learning_rate: 0.05
+    early_stopping_rounds: 50
+    max_depth: 4
+    max_leaves: 12
+    grow_policy: lossguide
+    min_child_weight: 1.0
+    gamma: 0.1
+    max_delta_step: 0.0
+    max_bin: 256
+    num_parallel_tree: 1
+    reg_lambda: 10.0
+    reg_alpha: 1.0
+    colsample_bytree: 0.8
+    colsample_bylevel: 1.0
+    colsample_bynode: 1.0
+    subsample: 0.8
+    tree_method: hist
+    sketch_eps: 0.03
+    sample_type: uniform
+    normalize_type: tree
+    rate_drop: 0.0
+    one_drop: false
+    skip_drop: 0.0
+    monotone_constraints: null
+    interaction_constraints: null
+    base_score: 0.5
+    random_state: 42
+    n_jobs: 1
+    verbosity: 0
+  random_forest:
+    criterion: squared_error
+    n_estimators: 100
+    max_depth: 10
+    min_samples_leaf: 200
+    min_samples_split: 400
+    min_impurity_decrease: 0.0
+    min_weight_fraction_leaf: 0.0
+    max_features: 0.8
+    max_samples: 0.8
+    bootstrap: true
+    oob_score: false
+    ccp_alpha: 0.01
+    warm_start: false
+    random_state: 42
+    n_jobs: 8
+backtest:
+  train_window: 500
+  gap: 5
+  test_step: 5
+  top_k: 30
+  friction_cost: 0.0004
+  limit_pct_threshold: 9.8
+  return_shap: false
+runtime:
+  default_mode: formal
+  shared_machine_default_mode: shared_machine
+  modes:
+    formal:
+      description: 正式全量 materialization；保留完整特征列、全日期范围与原始回测窗口。
+      recent_trade_dates: null
+      feature_limit: null
+      neutralize_chunk_days: 256
+      backtest_overrides: {}
+    shared_machine:
+      description: 共享机器降级取证模式；裁剪到最近 260 个交易日和前 32 个特征，并缩小回测窗口。
+      recent_trade_dates: 260
+      feature_limit: 32
+      neutralize_chunk_days: 128
+      backtest_overrides:
+        train_window: 120
+        test_step: 20
+analysis:
+  ic_output: data/features/ic_series.parquet
+  icir_output: data/features/icir.parquet
+  ic_decay_output: data/features/ic_decay.parquet
+  shap_output: data/features/shap_importance.parquet
+  ic_max_lag: 10
+engine:
+  n_cores: 4
+  float_dtype: float32
+  random_seed: 42
+hpo:
+  enabled: false
+  n_trials: 50
+  objective_metric: sharpe_ratio
+  output_dir: data/results/hpo
+  n_jobs: 1
+  timeout: null
+  resume: false
+  search_space:
+    lightgbm:
+      n_estimators:
+      - 100
+      - 500
+      learning_rate:
+      - 0.01
+      - 0.15
+      max_depth:
+      - 3
+      - 8
+    xgboost:
+      n_estimators:
+      - 100
+      - 500
+      learning_rate:
+      - 0.01
+      - 0.15
+      max_depth:
+      - 3
+      - 8
+    random_forest:
+      n_estimators:
+      - 50
+      - 300
+      max_depth:
+      - 5
+      - 20
+stacking:
+  enabled: false
+  base_learners:
+  - lightgbm
+  - xgboost
+  meta_learner: weight_averaging
+  validation_ratio: 0.2
+  cv_folds: 5
+  use_cv: true
+  output_dir: data/results/stacking
+paths:
+  data_raw: data/raw
+  data_features: data/features
+  data_results: data/results
+  data_cache: data/cache
+  models: models
+  logs: logs

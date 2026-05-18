@@ -1,0 +1,21 @@
+# ============================================================
+# 实验 Profile: 沪深300 + LightGBM 深度探索
+# 只需写要覆盖 base_config.yaml 的项，其余自动继承
+# ============================================================
+
+etl:
+  index_name: "hs300"
+  raw_output: "data/raw/hs300_10y_daily_clean.parquet"
+
+model:
+  active: "lightgbm"
+  lightgbm:
+    n_estimators: 300
+    learning_rate: 0.01
+    max_depth: 6
+    num_leaves: 20
+
+backtest:
+  top_k: 20
+  max_turnover: 0.5
+  benchmark_code: "sh.000300"

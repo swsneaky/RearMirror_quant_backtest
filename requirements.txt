@@ -1,0 +1,19 @@
+pandas>=2.0
+numpy>=1.24
+pyarrow>=14.0
+pyyaml>=6.0
+scipy>=1.11
+lightgbm>=4.0
+xgboost>=2.0
+scikit-learn>=1.3
+baostock>=0.8
+akshare>=1.10
+tqdm>=4.65
+plotly>=5.18
+joblib>=1.3
+shap>=0.44
+
+# API 服务
+fastapi>=0.109.0
+uvicorn>=0.27.0
+pydantic>=2.5
