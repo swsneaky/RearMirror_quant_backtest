@@ -10,11 +10,11 @@ dist/
 build/
 .venv/
 
-# Data (通过 Volume 挂载，不入库)
+# Data
 data/raw/
 data/features/
 data/stock_daily_cache/
-data/stock_daily_cache_*/   # 任意测试缓存目录
+data/stock_daily_cache_*/
 stock_daily_cache/
 *.parquet
 *.pkl
@@ -28,7 +28,7 @@ models/*.bin
 # Logs
 logs/
 
-# Experiments — 重量级产物不入库
+# Experiments
 experiments/
 
 # IDE
@@ -40,20 +40,20 @@ experiments/
 Thumbs.db
 .DS_Store
 
-# Database (不入库，太大)
+# Database
 data/*.db
 data/*.db-*
 data/*.db-wal
 data/*.db-shm
 data/*.bak*
 
-# Results (不入库)
+# Results
 data/results/
 
 # Backups
 backups/
 
-# Release packages (不入库)
+# Release packages
 *.zip
 RearMirror-v0.*/
 RearMirror-v0.9.0-beta/
@@ -61,5 +61,17 @@ RearMirror-v0.9.0-beta/
 # Cache
 data/cache/
 
-# QA (临时产物)
+# QA
 qa/
+
+# Internal collaboration artifacts (do not ship to end users)
+AGENTS.md
+AI_CONTEXT.md
+CLAUDE.md
+HANDOFF.md
+PROGRESS.md
+WORKLOG.md
+WORKLOG_archive/
+WORKLOG_index.json
+ISSUE_*.md
+daily_bar_fix_plan.md
